@@ -1,0 +1,309 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn import linear_model
+from sklearn.preprocessing import LabelEncoder
+
+data = pd.read_csv("Carseats.csv")
+
+Dasatet information 
+
+* Sales : Target Variable
+Unit sales (in thousands) at each location
+
+* CompPrice : 
+Price charged by competitor at each location
+
+* Income : 
+Community income level (in thousands of dollars)
+
+* Advertising : 
+Local advertising budget for company at each location (in thousands of dollars)
+
+* Population : 
+Population size in region (in thousands)
+
+* Price : 
+Price company charges for car seats at each site
+
+* ShelveLoc : 
+A factor with levels Bad, Good and Medium indicating the quality of the shelving location for the car seats at each site
+
+* Age : 
+Average age of the local population
+
+* Education : 
+Education level at each location
+
+* Urban : 
+A factor with levels No and Yes to indicate whether the store is in an urban or rural location
+
+* US : 
+A factor with levels No and Yes to indicate whether the store is in the US or not
+
+data.head()
+
+# 1. EDA
+
+data.info() #no null values in variables
+
+data.describe() #checking distribution/outliers for later analysis and predictive model 
+
+data.hist(edgecolor='black', linewidth=1, figsize=(20, 20)) #viasually the distributions of numeric variables
+
+Most have litte advertising put into them. 
+
+#Now we will analyze categorical variables and see their distribution among groups to analyze potential segmentations
+cat_cols = ['Education', 'ShelveLoc', 'Urban', 'US']
+
+plt.figure(figsize=(12, 10))
+
+for i, col in enumerate(cat_cols, 1):
+    plt.subplot(2, 2, i)
+    sns.countplot(x=col, data=data)
+    plt.title(f'Distribution of {col}')
+    
+    # Percentage labels on the bars to have apart from count
+    total = len(data[col])
+    for p in plt.gca().patches:
+        height = p.get_height()
+        plt.gca().text(p.get_x() + p.get_width() / 2, height, f'{height / total * 100:.1f}%', ha='center', va='bottom', color='black')
+
+plt.tight_layout()
+plt.show()
+
+We can look at whether we all US stores sales are higher than non, as well as the urban factor affects it.
+
+data.groupby(["US","Urban"])["Sales"].agg(["mean","sum"]) # highest sales on US Urban stores, tho US non Urban have the highest mean, I would like to check if the trend is recent but is not time-series data so we cant analyze that
+
+cont_cols = ['CompPrice', 'Income', 'Advertising', 'Population', 'Price', 'Age']
+
+# Subplots for scatter plots
+fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(15, 10))
+
+# Flattening the axes for easy indexing
+axes = axes.flatten()
+
+# Scatter plots
+for i, col in enumerate(cont_cols):
+    axes[i].scatter(x=col, y='Sales', data=data)
+    axes[i].set_xlabel(f"{col}")
+    axes[i].set_ylabel('Sales')
+    axes[i].set_title(f"{col} vs Sales")
+
+plt.tight_layout()
+plt.show()
+
+data['Competitive_Pricing'] = data['Price'] - data['CompPrice']
+corr_df = data[['Sales', 'Competitive_Pricing']]
+corr_df.corr()
+
+#data['RelativeAdvertising'] = data.apply(lambda row: row['Population'] / row['Advertising'] if row['Advertising'] != 0 else 0, axis=1)
+# much less correlated but still measures better the relationship since its taking into account population receiving the ads
+data['Relative_Advertising'] = np.where(data['Advertising'] != 0, np.log1p(data['Population'] / data['Advertising']), 0) #ended up takign log to capture change better 
+corr_df = data[['Sales', 'Relative_Advertising']]
+corr_df.corr()
+
+data
+
+plt.figure(figsize=(10,10), dpi= 80)
+plt.scatter(x='Competitive_Pricing', y='Sales', data=data)
+plt.xlabel('Price Difference with competition')
+plt.ylabel('Sales')
+plt.show() # we can see more correlation with this new variable, interesting for latter modelling
+
+plt.figure(figsize=(10,10), dpi= 80)
+plt.scatter(x='Relative_Advertising', y='Sales', data=data)
+plt.xlabel('Price Difference with relative advertising')
+plt.ylabel('Sales')
+plt.show() # we can see more correlation with this new variable, interesting for latter modelling
+
+correlation_matrix = data.corr()
+
+# Set up the matplotlib figure
+plt.figure(figsize=(10, 8))
+
+# Create a heatmap using seaborn
+sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+
+# Show the plot
+plt.title('Correlation Matrix')
+plt.show()
+
+# Correlation of each feature with the target variable 'Sales'
+target_correlation = correlation_matrix['Sales'].abs().sort_values(ascending=False)
+print("\nCorrelation with Sales:")
+print(target_correlation)
+
+# Features with at least 0.1 correlation
+selected_features = target_correlation[target_correlation > 0.1].index
+print("\nSelected Features:")
+print(selected_features)
+
+# 2. Multiple Regression
+
+Influence on 1% competitive price change or relative advertising
+
+data.head()
+
+# Getting the data ready for regression
+
+X = data.drop('Sales', axis=1)  # Features
+y = data['Sales']  # Target variable
+
+# Identify categorical columns
+categorical_columns = X.select_dtypes(include=['object']).columns
+
+# Label encode categorical columns
+label_encoder = LabelEncoder()
+X_label_encoded = X.copy()
+for col in categorical_columns:
+    X_label_encoded[col] = label_encoder.fit_transform(X[col])
+
+# Encoded dataframes
+print("Label Encoded Data:")
+print(X_label_encoded.head())
+
+import statsmodels.api as sm
+
+# OLS Regression Results table
+X_label_encoded = sm.add_constant(X_label_encoded) 
+
+model2 = sm.OLS(y, X_label_encoded)
+results2 = model2.fit()
+
+print(results2.summary())
+
+# repeat, same results but for gives us the right format
+regr = linear_model.LinearRegression()
+regr.fit(X_label_encoded , y)
+
+print(regr.coef_)
+
+# Store managers can put their store characteristics and be given the expected sales
+
+# We take coefficients from the previous model generated, as well as the intercept
+coefficients = regr.coef_
+intercept = regr.intercept_
+
+print(coefficients)
+
+def predict_sales(features):
+    # Assuming features is a list or array with the client's input
+    
+    # Check lengths before proceeding
+    if len(features) != len(coefficients):
+        raise ValueError("Lengths of features and coefficients do not match.")
+    
+    predicted_sales = np.dot(features, coefficients) + intercept
+    return predicted_sales
+
+# Example usage:
+client_input_features = [1, 5, 8, 1, 1, 1, 11, 1, 1, 1, 1, 1, 1]  # Assuming 13 features (including the constant term)
+
+predicted_sales = predict_sales(client_input_features)
+print(f"Predicted Sales: {predicted_sales}")
+
+
+# Choose the variable to vary (e.g., Competitive_Pricing)
+varying_feature = 'Competitive_Pricing'
+constant_features = X_label_encoded.columns.difference([varying_feature])
+
+# Set constant values for other features
+constant_values = {feature: X_label_encoded[feature].mean() for feature in constant_features}
+
+# Create a range of values for the chosen feature
+varying_values = np.linspace(X_label_encoded[varying_feature].min(), X_label_encoded[varying_feature].max(), 100)
+
+# Initialize an array to store predicted sales for each varying value
+predicted_sales = []
+
+# Iterate through varying values and predict sales
+for value in varying_values:
+    constant_values[varying_feature] = value
+    input_values = np.array([constant_values[feature] for feature in X_label_encoded.columns])
+    predicted_sales.append(np.dot(input_values, regr.coef_) + regr.intercept_)
+
+# Find the index where predicted sales start decreasing
+negative_impact_index = np.where(np.diff(predicted_sales) < 0)[0][0]
+
+# Get the corresponding value of Competitive_Pricing
+negative_impact_value = varying_values[negative_impact_index]
+
+print(f"The point at which competitive pricing becomes less profitable is at {negative_impact_value} for {varying_feature}")
+
+
+# Choose the variables to vary (e.g., Advertising and Price)
+varying_features = ['Relative_Advertising', 'Price']
+constant_features = X_label_encoded.columns.difference(varying_features)
+
+# Set constant values for other features
+constant_values = {feature: X_label_encoded[feature].mean() for feature in constant_features}
+
+# Create a range of values for the chosen features
+advertising_values = np.linspace(X_label_encoded['Advertising'].min(), X_label_encoded['Advertising'].max(), 100)
+price_values = np.linspace(X_label_encoded['Price'].min(), X_label_encoded['Price'].max(), 100)
+
+advertising_mesh, price_mesh = np.meshgrid(advertising_values, price_values)
+
+# Initialize an array to store predicted sales for each combination of values
+predicted_sales = []
+
+# Iterate through combinations of values and predict sales
+for advertising, price in zip(advertising_mesh.flatten(), price_mesh.flatten()):
+    constant_values['Advertising'] = advertising
+    constant_values['Price'] = price
+    input_values = np.array([constant_values[feature] for feature in X_label_encoded.columns])
+    predicted_sales.append(np.dot(input_values, regr.coef_) + regr.intercept_)
+
+# Reshape the predicted sales array to match the shape of the meshgrid
+predicted_sales = np.array(predicted_sales).reshape(advertising_mesh.shape)
+
+# Find the indices where predicted sales start decreasing for both features
+negative_impact_indices = np.where(np.diff(predicted_sales, axis=0) < 0)
+
+# Get the corresponding values of Advertising and Price
+advertising_negative_impact_values = advertising_values[negative_impact_indices[0]]
+price_negative_impact_values = price_values[negative_impact_indices[1]]
+
+print(f"The point at which investing too much in advertising harms sales is at {advertising_negative_impact_values.min()} for Advertising")
+print(f"The point at which the price becomes too low to be profitable is at {price_negative_impact_values.min()} for Price")
+
+
+
+# 3. Decision Tree
+
+X_train, X_test, y_train, y_test = train_test_split(X_label_encoded, y, test_size=0.3, random_state=42)
+
+print('Train features shape: {}'.format(X_train.shape))
+print('Train labels shape: {}'.format(y_train.shape))
+print('Test features shape: {}'.format(X_test.shape))
+print('Test labels shape: {}'.format(y_test.shape))
+
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.metrics import mean_squared_error
+
+reg_dt= DecisionTreeRegressor(min_samples_leaf=3, min_samples_split=2, max_depth=3, random_state=42)
+reg_dt.fit(X_train, y_train)
+
+pred = reg_dt.predict(X_test)
+MSE = mean_squared_error(y_test, pred)
+RMSE = np.sqrt(MSE)
+
+print(f"MSE : {MSE}, RMSE : {RMSE}")
+
+from sklearn.tree import plot_tree
+import matplotlib.pyplot as plt
+
+def plot_decision_tree(regressor, feature_names, target_name):
+    plt.figure(figsize=(12, 8))
+    plot_tree(regressor, filled=True, feature_names=feature_names, rounded=True, proportion=True, precision=2, fontsize=9)
+    plt.title(f'Decision Tree for {target_name}', fontsize=15)
+    plt.show()
+
+# Assuming X_train.columns contains the feature names
+plot_decision_tree(reg_dt, X_train.columns, 'Sales')
+
+
